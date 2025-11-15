@@ -1,0 +1,85 @@
+name: "Rust-like-Haskell — 3OS Build + ProofLedger + Clean Release"
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rust-like-haskell-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-3os:
+    name: "Build — ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      # ----------------------------------------------------------
+      # Checkout
+      # ----------------------------------------------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ----------------------------------------------------------
+      # Setup GHC
+      # ----------------------------------------------------------
+      - name: Setup Haskell (GHC + Cabal)
+        uses: haskell/actions/setup@v2
+        with:
+          ghc-version: "9.4.8"
+          cabal-version: "3.10.1.0"
+
+      # ----------------------------------------------------------
+      # Build all Haskell modules
+      # ----------------------------------------------------------
+      - name: Build Rust-like-Haskell Source
+        run: |
+          mkdir -p dist
+          echo "[Build] Compiling all .hs modules..."
+          find src -name "*.hs" -print0 | xargs -0 -I{} ghc -outputdir dist -c {}
+
+          # Link executable
+          ghc src/Main.hs -o dist/out-${{ matrix.os }}
+
+      # ----------------------------------------------------------
+      # Generate Proof Ledger
+      # ----------------------------------------------------------
+      - name: Generate ProofLedger
+        run: |
+          echo "Repository: Rust-like-Haskell" > proofledger-${{ matrix.os }}.txt
+          echo "Commit: $GITHUB_SHA" >> proofledger-${{ matrix.os }}.txt
+          echo "Branch: $GITHUB_REF_NAME" >> proofledger-${{ matrix.os }}.txt
+          echo "OS: ${{ matrix.os }}" >> proofledger-${{ matrix.os }}.txt
+          echo "Timestamp: $(date)" >> proofledger-${{ matrix.os }}.txt
+
+          # SHA256 checksums
+          echo "--- SHA256 Checksums ---" >> proofledger-${{ matrix.os }}.txt
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            certutil -hashfile dist\\out-${{ matrix.os }} SHA256 >> proofledger-${{ matrix.os }}.txt
+          else
+            shasum -a 256 dist/out-${{ matrix.os }} >> proofledger-${{ matrix.os }}.txt
+          fi
+
+      # ----------------------------------------------------------
+      # Upload Artifacts
+      # ----------------------------------------------------------
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: out-${{ matrix.os }}
+          path: dist/out-${{ matrix.os }}
+
+      - name: Upload ProofLedger
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofledger-${{ matrix.os }}.txt
+          path: proofledger-${{ matrix.os }}.txt
