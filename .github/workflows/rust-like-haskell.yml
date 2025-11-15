@@ -1,4 +1,4 @@
-name: "Rust-like-Haskell — 3OS Build + ProofLedger + Clean Release"
+name: "Rust-like-Haskell — 3OS Build + ProofLedger + Fast Win GHC"
 
 on:
   push:
@@ -30,53 +30,83 @@ jobs:
           fetch-depth: 0
 
       # ----------------------------------------------------------
-      # Setup GHC
+      # Setup GHC (FAST MODE for Windows)
       # ----------------------------------------------------------
-      - name: Setup Haskell (GHC + Cabal)
+      - name: Setup GHC (Windows Fast)
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "[Windows] Installing MSYS2..."
+          choco install msys2 --no-progress
+
+          echo "[Windows] Updating pacman..."
+          C:\tools\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm"
+
+          echo "[Windows] Installing GHC..."
+          C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm ghc"
+
+          echo "[Windows] GHC Version:"
+          C:\tools\msys64\usr\bin\bash -lc "ghc --version"
+
+      # ----------------------------------------------------------
+      # Setup GHC (Ubuntu/macOS)
+      # ----------------------------------------------------------
+      - name: Setup GHC (Unix)
+        if: matrix.os != 'windows-latest'
         uses: haskell/actions/setup@v2
         with:
           ghc-version: "9.4.8"
           cabal-version: "3.10.1.0"
 
       # ----------------------------------------------------------
-      # Build all Haskell modules
+      # Build all .hs modules
       # ----------------------------------------------------------
-      - name: Build Rust-like-Haskell Source
+      - name: Build Rust-like-Haskell (.hs compile)
         run: |
+          echo "[Build] Starting Haskell compile..."
           mkdir -p dist
-          echo "[Build] Compiling all .hs modules..."
-          find src -name "*.hs" -print0 | xargs -0 -I{} ghc -outputdir dist -c {}
 
-          # Link executable
-          ghc src/Main.hs -o dist/out-${{ matrix.os }}
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo "[Windows] Compiling via MSYS2..."
+            C:\tools\msys64\usr\bin\bash -lc "find src -name '*.hs' -print0 | xargs -0 -I{} ghc -outputdir dist -c {}"
+
+            # Link Main.hs separately
+            C:\tools\msys64\usr\bin\bash -lc "ghc src/Main.hs -o dist/out-windows-latest.exe"
+          else
+            echo "[Unix] Compiling via native GHC..."
+            find src -name "*.hs" -print0 | xargs -0 -I{} ghc -outputdir dist -c {}
+            ghc src/Main.hs -o dist/out-${{ matrix.os }}
+          fi
 
       # ----------------------------------------------------------
-      # Generate Proof Ledger
+      # Generate ProofLedger (commit, sha256, os info)
       # ----------------------------------------------------------
       - name: Generate ProofLedger
+        shell: bash
         run: |
+          OUT_NAME="out-${{ matrix.os }}"
+          [ "${{ matrix.os }}" = "windows-latest" ] && OUT_NAME="out-windows-latest.exe"
+
           echo "Repository: Rust-like-Haskell" > proofledger-${{ matrix.os }}.txt
           echo "Commit: $GITHUB_SHA" >> proofledger-${{ matrix.os }}.txt
           echo "Branch: $GITHUB_REF_NAME" >> proofledger-${{ matrix.os }}.txt
           echo "OS: ${{ matrix.os }}" >> proofledger-${{ matrix.os }}.txt
           echo "Timestamp: $(date)" >> proofledger-${{ matrix.os }}.txt
+          echo "--- SHA256 ---" >> proofledger-${{ matrix.os }}.txt
 
-          # SHA256 checksums
-          echo "--- SHA256 Checksums ---" >> proofledger-${{ matrix.os }}.txt
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            certutil -hashfile dist\\out-${{ matrix.os }} SHA256 >> proofledger-${{ matrix.os }}.txt
+            certutil -hashfile dist\\$OUT_NAME SHA256 >> proofledger-${{ matrix.os }}.txt
           else
-            shasum -a 256 dist/out-${{ matrix.os }} >> proofledger-${{ matrix.os }}.txt
+            shasum -a 256 dist/$OUT_NAME >> proofledger-${{ matrix.os }}.txt
           fi
 
       # ----------------------------------------------------------
       # Upload Artifacts
       # ----------------------------------------------------------
-      - name: Upload Build Artifact
+      - name: Upload Executable
         uses: actions/upload-artifact@v4
         with:
           name: out-${{ matrix.os }}
-          path: dist/out-${{ matrix.os }}
+          path: dist/
 
       - name: Upload ProofLedger
         uses: actions/upload-artifact@v4
